@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>SC2 Session Stats</title>
+<!-- ==========================================================================
+     CONFIGURACION DEL EQUIPO
+     ==========================================================================
+     Para que este overlay funcione durante el casteo de torneos (donde se
+     mezclan partidas de distintos jugadores), cada miembro del equipo debe
+     indicar aqui SU propio nombre de usuario de SC2 exactamente como aparece
+     en el juego (respetando mayusculas/minusculas y caracteres especiales).
+
+     El overlay usara este nombre para identificar cual de los dos jugadores
+     de cada partida es "el nuestro" y así sumar correctamente victorias,
+     derrotas y el desglose contra cada raza, sin importar si el jugador
+     configurado aparece como players[0] o players[1] en los datos de SC2.
+
+     INSTRUCCIONES PARA EL EQUIPO:
+     1. Cambia el valor de MY_PLAYER_NAME abajo por tu propio usuario de SC2.
+     2. Guarda el archivo.
+     3. Listo, el resto del overlay funciona igual para todos.
+     ========================================================================== -->
+<script>
+  const MY_PLAYER_NAME = "Kvzonbr"; // <-- CAMBIA ESTO por tu usuario de SC2
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<!-- El CSS del overlay ahora vive en style.css, en la misma carpeta que este archivo -->
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="panel">
+  <div id="header">
+    <div id="title"><span id="api-dot"></span><span id="title-text">Jornada</span></div>
+    <button id="reset-btn" onclick="resetSession()">Reset</button>
+  </div>
+
+  <div id="totals">
+    <div class="stat">
+      <div class="num" id="total-games">0</div>
+      <div class="lbl">Jugadas</div>
+    </div>
+    <div class="stat wins">
+      <div class="num" id="total-wins">0</div>
+      <div class="lbl">Ganadas</div>
+    </div>
+    <div class="stat losses">
+      <div class="num" id="total-losses">0</div>
+      <div class="lbl">Perdidas</div>
+    </div>
+  </div>
+
+  <div id="vs-races">
+    <div class="vs-row">
+      <div class="vs-race"><span class="dot T"></span>vs Terran</div>
+      <div class="vs-record"><span class="w" id="T-w">0</span><span class="sep">-</span><span class="l" id="T-l">0</span></div>
+    </div>
+    <div class="vs-row">
+      <div class="vs-race"><span class="dot P"></span>vs Protoss</div>
+      <div class="vs-record"><span class="w" id="P-w">0</span><span class="sep">-</span><span class="l" id="P-l">0</span></div>
+    </div>
+    <div class="vs-row">
+      <div class="vs-race"><span class="dot Z"></span>vs Zerg</div>
+      <div class="vs-record"><span class="w" id="Z-w">0</span><span class="sep">-</span><span class="l" id="Z-l">0</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ==========================================================================
+   Estadisticas de la jornada (sesion completa, no se resetea entre partidas)
+   Lee el mismo archivo status.json que escribe sc2_proxy.py
+   Se guarda en localStorage para persistir aunque se recargue la fuente en OBS
+   ========================================================================== */
+
+const STORAGE_KEY = 'sc2_session_stats_v1';
+const STATUS_FILE = 'status.json';
+const POLL_INTERVAL_MS = 1500;
+
+function loadStats() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return {
+    games: 0, wins: 0, losses: 0,
+    vsRace: {
+      T: { w: 0, l: 0 },
+      P: { w: 0, l: 0 },
+      Z: { w: 0, l: 0 }
+    },
+    lastMatchKey: null,
+    lastDisplayTime: 0,
+    scoredThisGame: false
+  };
+}
+
+function saveStats() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+}
+
+let stats = loadStats();
+
+function renderStats() {
+  document.getElementById('total-games').textContent = stats.games;
+  document.getElementById('total-wins').textContent = stats.wins;
+  document.getElementById('total-losses').textContent = stats.losses;
+  ['T', 'P', 'Z'].forEach(r => {
+    document.getElementById(r + '-w').textContent = stats.vsRace[r].w;
+    document.getElementById(r + '-l').textContent = stats.vsRace[r].l;
+  });
+}
+
+function resetSession() {
+  stats = {
+    games: 0, wins: 0, losses: 0,
+    vsRace: { T: { w: 0, l: 0 }, P: { w: 0, l: 0 }, Z: { w: 0, l: 0 } },
+    lastMatchKey: stats.lastMatchKey,
+    lastDisplayTime: stats.lastDisplayTime,
+    scoredThisGame: false
+  };
+  saveStats();
+  renderStats();
+}
+
+function raceCodeFromApi(raceStr) {
+  if (!raceStr) return null;
+  const s = String(raceStr).toLowerCase();
+  if (s.startsWith('terr')) return 'T';
+  if (s.startsWith('prot')) return 'P';
+  if (s.startsWith('zerg')) return 'Z';
+  return null;
+}
+
+function setApiConnected(connected) {
+  const dot = document.getElementById('api-dot');
+  dot.classList.toggle('connected', connected);
+}
+
+function setPlayerFound(found) {
+  const title = document.getElementById('title');
+  if (!title) return;
+  title.title = found
+    ? ''
+    : 'Jugador "' + MY_PLAYER_NAME + '" no encontrado en la partida actual (no se contabiliza)';
+  title.style.opacity = found ? '1' : '0.5';
+}
+
+/* Identifica cual de los dos jugadores es "el nuestro" comparando el nombre
+   configurado en MY_PLAYER_NAME (arriba en el head) contra los nombres que
+   entrega el API de SC2. Esto permite castear/mezclar partidas de distintos
+   jugadores del equipo sin que la estadistica se sume al jugador equivocado. */
+function handleData(data) {
+  if (!data || !Array.isArray(data.players) || data.players.length < 2) return;
+
+  // Los replays no son partidas jugadas en vivo: nunca deben contabilizarse.
+  if (data.isReplay) return;
+
+  const configuredName = (MY_PLAYER_NAME || '').trim().toLowerCase();
+  const p0Name = (data.players[0].name || '').trim().toLowerCase();
+  const p1Name = (data.players[1].name || '').trim().toLowerCase();
+
+  let me, opp;
+  if (configuredName && p0Name === configuredName) {
+    me = data.players[0];
+    opp = data.players[1];
+  } else if (configuredName && p1Name === configuredName) {
+    me = data.players[1];
+    opp = data.players[0];
+  } else {
+    // No se encontro el nombre configurado en esta partida (por ejemplo,
+    // se esta viendo/casteando una partida ajena): no se contabiliza.
+    setPlayerFound(false);
+    return;
+  }
+  setPlayerFound(true);
+
+  const matchKey = (me.name || '') + '|' + (opp.name || '');
+  const displayTime = typeof data.displayTime === 'number' ? data.displayTime : null;
+
+  // Umbral de caida de displayTime para considerar que es una partida nueva.
+  // Al iniciar una nueva partida, displayTime vuelve a un valor cercano a 0,
+  // asi que si baja de forma notoria respecto al ultimo valor visto (incluso
+  // contra el mismo rival), lo tratamos como un juego distinto.
+  const DISPLAY_TIME_DROP_THRESHOLD = 3;
+  const isNewGameByTime =
+    displayTime !== null &&
+    displayTime < stats.lastDisplayTime - DISPLAY_TIME_DROP_THRESHOLD;
+
+  const isNewMatchup = matchKey && matchKey !== stats.lastMatchKey;
+
+  // Si la ultima lectura valida fue un replay, la primera partida en vivo
+  // que se vea despues SIEMPRE se trata como partida nueva, sin depender
+  // de si el matchup o el displayTime lograron detectar el cambio.
+  const comingFromReplay = stats.lastWasReplay;
+
+  if (isNewMatchup || isNewGameByTime || comingFromReplay) {
+    stats.lastMatchKey = matchKey;
+    stats.scoredThisGame = false;
+    stats.lastWasReplay = false;
+    saveStats();
+  }
+
+  if (displayTime !== null) {
+    stats.lastDisplayTime = displayTime;
+    saveStats();
+  }
+
+  if (stats.scoredThisGame) return;
+
+  const oppRace = raceCodeFromApi(opp.race);
+  const result = me.result;
+
+  if (result === 'Victory' || result === 'Defeat') {
+    stats.games += 1;
+    if (result === 'Victory') {
+      stats.wins += 1;
+      if (oppRace) stats.vsRace[oppRace].w += 1;
+    } else {
+      stats.losses += 1;
+      if (oppRace) stats.vsRace[oppRace].l += 1;
+    }
+    stats.scoredThisGame = true;
+    saveStats();
+    renderStats();
+  }
+}
+
+async function poll() {
+  try {
+    const res = await fetch(STATUS_FILE + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    setApiConnected(true);
+    handleData(data);
+  } catch (err) {
+    setApiConnected(false);
+  }
+}
+
+renderStats();
+setInterval(poll, POLL_INTERVAL_MS);
+poll();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>SC2 Tournament Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --terran-blue: #4fa8e0;
+    --terran-blue-dark: #1c4d70;
+    --protoss-gold: #f2c14e;
+    --protoss-gold-dark: #6b551f;
+    --zerg-purple: #b06ee0;
+    --zerg-purple-dark: #4a2a63;
+    --steel: #7d8896;
+    --panel: rgba(8,11,16,0.92);
+    --panel-light: rgba(20,26,34,0.92);
+    --line: rgba(255,255,255,0.12);
+    --text: #eef4f8;
+    --text-dim: #7f8c99;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    font-family: 'Rajdhani', sans-serif;
+    color: var(--text);
+  }
+  #stage {
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  #board {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    min-width: 700px;
+    background: var(--panel);
+    border-top: 2px solid var(--steel);
+    border-bottom: 2px solid var(--steel);
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+    filter: drop-shadow(0 6px 14px rgba(0,0,0,0.55));
+  }
+  #board::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--terran-blue) 0%, var(--terran-blue) 48%, var(--steel) 50%, var(--protoss-gold) 52%, var(--zerg-purple) 100%);
+  }
+
+  .side {
+    flex: 1;
+    padding: 16px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    position: relative;
+    background: var(--panel-light);
+  }
+  .side.left { border-right: 1px solid var(--line); }
+
+  .race-strip {
+    position: absolute;
+    top: 0; bottom: 0; left: 0;
+    width: 4px;
+  }
+  .side.right .race-strip { left: auto; right: 0; }
+  .race-strip.T { background: var(--terran-blue); box-shadow: 0 0 8px var(--terran-blue); }
+  .race-strip.P { background: var(--protoss-gold); box-shadow: 0 0 8px var(--protoss-gold); }
+  .race-strip.Z { background: var(--zerg-purple); box-shadow: 0 0 8px var(--zerg-purple); }
+
+  .top-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .side.right .top-row { flex-direction: row-reverse; }
+
+  .race-icon {
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    padding: 4px;
+    border: 1px solid var(--line);
+    background: rgba(0,0,0,0.35);
+  }
+  .race-icon.T svg { fill: var(--terran-blue); }
+  .race-icon.P svg { fill: var(--protoss-gold); }
+  .race-icon.Z svg { fill: var(--zerg-purple); }
+
+  .name-wrap { flex: 1; min-width: 0; }
+  .label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 9px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .side.right .label { text-align: right; }
+
+  .name-input {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid transparent;
+    color: var(--text);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 2px 0;
+    width: 100%;
+    outline: none;
+    text-transform: uppercase;
+  }
+  .side.right .name-input { text-align: right; }
+  .name-input:focus, .name-input:hover { border-bottom: 1px solid var(--line); }
+
+  .race-row {
+    display: flex;
+    gap: 4px;
+  }
+  .side.right .race-row { flex-direction: row-reverse; }
+  .race-btn {
+    flex: 1;
+    text-align: center;
+    padding: 4px 0;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-family: 'Orbitron', sans-serif;
+    border: 1px solid var(--line);
+    background: rgba(0,0,0,0.3);
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+  }
+  .race-btn[data-race="T"].active { background: var(--terran-blue-dark); border-color: var(--terran-blue); color: #dff0ff; }
+  .race-btn[data-race="P"].active { background: var(--protoss-gold-dark); border-color: var(--protoss-gold); color: #fff3d6; }
+  .race-btn[data-race="Z"].active { background: var(--zerg-purple-dark); border-color: var(--zerg-purple); color: #f4e6ff; }
+
+  .score-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .side.right .score-row { flex-direction: row-reverse; }
+
+  .score-num {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 42px;
+    font-weight: 900;
+    line-height: 1;
+    min-width: 44px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    text-shadow: 0 0 12px rgba(255,255,255,0.15);
+  }
+
+  .pips { display: flex; gap: 5px; }
+  .side.right .pips { flex-direction: row-reverse; }
+  .pip {
+    width: 12px;
+    height: 12px;
+    border: 1px solid var(--line);
+    background: rgba(0,0,0,0.3);
+    cursor: pointer;
+    clip-path: polygon(20% 0%, 80% 0%, 100% 50%, 80% 100%, 20% 100%, 0% 50%);
+  }
+  .pip.filled.T { background: var(--terran-blue); border-color: var(--terran-blue); }
+  .pip.filled.P { background: var(--protoss-gold); border-color: var(--protoss-gold); }
+  .pip.filled.Z { background: var(--zerg-purple); border-color: var(--zerg-purple); }
+
+  .score-buttons { display: flex; gap: 4px; margin-left: auto; }
+  .side.right .score-buttons { margin-left: 0; margin-right: auto; }
+  .sc-btn {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--line);
+    background: rgba(0,0,0,0.3);
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Orbitron', sans-serif;
+  }
+  .sc-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
+  #vs-mid {
+    width: 92px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 8px;
+    border-right: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+    background: rgba(0,0,0,0.5);
+  }
+  #vs-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 20px;
+    font-weight: 900;
+    letter-spacing: 1px;
+    color: var(--steel);
+  }
+  #bo-select {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--line);
+    color: var(--text);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    padding: 3px 4px;
+    text-align: center;
+    width: 100%;
+  }
+  #bo-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    font-family: 'Orbitron', sans-serif;
+  }
+  #reset-btn {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--line);
+    color: var(--text-dim);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 5px 4px;
+    cursor: pointer;
+    width: 100%;
+  }
+  #reset-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
+  #api-status {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #d0555a;
+    text-align: center;
+  }
+  #api-status.connected { color: #6fd08a; }
+  #api-status::before {
+    content: "● ";
+  }
+
+  #auto-toggle-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 8px;
+    font-family: 'Orbitron', sans-serif;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  #auto-toggle-wrap input { cursor: pointer; }
+
+  #api-debug {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 8px;
+    color: rgba(255,255,255,0.35);
+    text-align: center;
+    max-width: 88px;
+    word-break: break-word;
+    line-height: 1.25;
+  }
+
+  .hint {
+    position: fixed;
+    bottom: 6px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 9px;
+    color: rgba(255,255,255,0.3);
+    font-family: 'Rajdhani', sans-serif;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="board">
+    <div class="side left">
+      <div class="race-strip T" id="strip1"></div>
+      <div class="label">Jugador 1</div>
+      <div class="top-row">
+        <div class="race-icon T" id="icon1"></div>
+        <div class="name-wrap">
+          <input class="name-input" id="name1" value="PLAYER ONE" maxlength="16">
+        </div>
+      </div>
+      <div class="race-row" id="race1">
+        <div class="race-btn active" data-race="T">Terran</div>
+        <div class="race-btn" data-race="P">Protoss</div>
+        <div class="race-btn" data-race="Z">Zerg</div>
+      </div>
+      <div class="score-row">
+        <div class="score-num" id="score1">0</div>
+        <div class="pips" id="pips1"></div>
+        <div class="score-buttons">
+          <button class="sc-btn" onclick="changeScore(1,-1)">-</button>
+          <button class="sc-btn" onclick="changeScore(1,1)">+</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="vs-mid">
+      <div id="vs-label">VS</div>
+      <div id="bo-label">BEST OF</div>
+      <select id="bo-select" onchange="renderPips()">
+        <option value="3">3</option>
+        <option value="5" selected>5</option>
+        <option value="7">7</option>
+        <option value="9">9</option>
+      </select>
+      <button id="reset-btn" onclick="resetSeries()">Reset</button>
+      <div id="api-status">Sin conexión</div>
+      <label id="auto-toggle-wrap">
+        <input type="checkbox" id="auto-toggle" checked>
+        Auto SC2
+      </label>
+      <div id="api-debug">–</div>
+    </div>
+
+    <div class="side right">
+      <div class="race-strip P" id="strip2"></div>
+      <div class="label">Jugador 2</div>
+      <div class="top-row">
+        <div class="race-icon P" id="icon2"></div>
+        <div class="name-wrap">
+          <input class="name-input" id="name2" value="PLAYER TWO" maxlength="16">
+        </div>
+      </div>
+      <div class="race-row" id="race2">
+        <div class="race-btn" data-race="T">Terran</div>
+        <div class="race-btn active" data-race="P">Protoss</div>
+        <div class="race-btn" data-race="Z">Zerg</div>
+      </div>
+      <div class="score-row">
+        <div class="score-buttons">
+          <button class="sc-btn" onclick="changeScore(2,-1)">-</button>
+          <button class="sc-btn" onclick="changeScore(2,1)">+</button>
+        </div>
+        <div class="pips" id="pips2"></div>
+        <div class="score-num" id="score2">0</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="hint">Click nombre para editar · Click raza para cambiar · +/- o pips para marcar victorias · Reset al cambiar jugador</div>
+
+<script>
+// Iconos de raza dibujados a mano en SVG (no logos oficiales protegidos, sino símbolos representativos)
+const ICONS = {
+  T: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <path d="M50 6 L90 26 V70 L50 94 L10 70 V26 Z" fill="none" stroke-width="6" stroke="currentColor"/>
+        <path d="M50 6 L90 26 V70 L50 94 L10 70 V26 Z" opacity="0"/>
+        <path d="M30 34 H70 V44 H55 V78 H45 V44 H30 Z"/>
+      </svg>`,
+  P: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <path d="M50 4 L96 50 L50 96 L4 50 Z" fill="none" stroke-width="6" stroke="currentColor"/>
+        <path d="M50 26 L74 50 L50 74 L26 50 Z"/>
+      </svg>`,
+  Z: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <path d="M50 8 C74 8 92 28 92 52 C92 74 74 92 50 92 C26 92 8 74 8 52 C8 28 26 8 50 8 Z" fill="none" stroke-width="6" stroke="currentColor"/>
+        <path d="M50 26 C40 26 26 36 26 52 C26 62 34 70 42 70 C42 60 46 46 60 46 C68 46 74 52 74 60 C82 54 82 40 74 32 C67 25 58 26 50 26 Z"/>
+      </svg>`
+};
+
+// Nombres de archivo que se buscarán en la MISMA carpeta donde está este HTML.
+// Coloca aquí tus logos oficiales con estos nombres exactos (png, jpg o svg funcionan).
+const LOGO_FILES = {
+  T: ['terran.png', 'terran.jpg', 'terran.svg'],
+  P: ['protoss.png', 'protoss.jpg', 'protoss.svg'],
+  Z: ['zerg.png', 'zerg.jpg', 'zerg.svg']
+};
+
+// Se va llenando a medida que se confirma si el archivo existe (true) o no (false/undefined mientras carga)
+const logoUrl = { T: null, P: null, Z: null };
+
+function tryLoadLogo(race, fileIndex) {
+  return new Promise((resolve) => {
+    const files = LOGO_FILES[race];
+    if (fileIndex >= files.length) { resolve(null); return; }
+    const img = new Image();
+    img.onload = () => resolve(files[fileIndex]);
+    img.onerror = () => resolve(tryLoadLogoNext(race, fileIndex + 1));
+    img.src = files[fileIndex];
+  });
+}
+function tryLoadLogoNext(race, fileIndex) {
+  return tryLoadLogo(race, fileIndex);
+}
+
+async function preloadLogos() {
+  for (const race of ['T', 'P', 'Z']) {
+    logoUrl[race] = await tryLoadLogo(race, 0);
+  }
+  // Una vez resuelto (encontrado o no), refrescar los iconos ya puestos en pantalla
+  setIcon(1, races[1]);
+  setIcon(2, races[2]);
+}
+
+function setIcon(side, race) {
+  const el = document.getElementById('icon' + side);
+  el.className = 'race-icon ' + race;
+  if (logoUrl[race]) {
+    // Se encontró el archivo del logo oficial en la carpeta: se usa la imagen real
+    el.innerHTML = `<img src="${logoUrl[race]}" alt="${race}" style="width:100%;height:100%;object-fit:contain;">`;
+  } else {
+    // No se encontró (o aún no se resolvió la búsqueda): se mantiene el ícono diseñado
+    el.innerHTML = ICONS[race];
+  }
+  document.getElementById('strip' + side).className = 'race-strip ' + race;
+}
+
+setIcon(1, 'T');
+setIcon(2, 'P');
+preloadLogos();
+
+let scores = { 1: 0, 2: 0 };
+let races = { 1: 'T', 2: 'P' };
+
+function changeScore(player, delta) {
+  const bo = parseInt(document.getElementById('bo-select').value, 10);
+  const maxWins = Math.ceil(bo / 2);
+  let v = scores[player] + delta;
+  if (v < 0) v = 0;
+  if (v > maxWins) v = maxWins;
+  scores[player] = v;
+  renderPips();
+}
+
+function renderPips() {
+  const bo = parseInt(document.getElementById('bo-select').value, 10);
+  const maxWins = Math.ceil(bo / 2);
+  for (const p of [1, 2]) {
+    if (scores[p] > maxWins) scores[p] = maxWins;
+    const scoreEl = document.getElementById('score' + p);
+    if (scoreEl) scoreEl.textContent = scores[p];
+    const container = document.getElementById('pips' + p);
+    if (!container) continue; // evita el error si el elemento aún no existe en el DOM
+    container.innerHTML = '';
+    for (let i = 0; i < maxWins; i++) {
+      const pip = document.createElement('div');
+      pip.className = 'pip' + (i < scores[p] ? ' filled ' + races[p] : '');
+      pip.title = 'Set score to ' + (i + 1);
+      pip.addEventListener('click', () => {
+        scores[p] = (scores[p] === i + 1) ? i : i + 1;
+        renderPips();
+      });
+      container.appendChild(pip);
+    }
+  }
+}
+
+function resetSeries() {
+  scores = { 1: 0, 2: 0 };
+  renderPips();
+}
+
+document.querySelectorAll('.race-row').forEach((row, idx) => {
+  const side = idx + 1;
+  row.addEventListener('click', (e) => {
+    const btn = e.target.closest('.race-btn');
+    if (!btn) return;
+    row.querySelectorAll('.race-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const race = btn.getAttribute('data-race');
+    races[side] = race;
+    setIcon(side, race);
+    renderPips();
+  });
+});
+
+['name1', 'name2'].forEach(id => {
+  const el = document.getElementById(id);
+  let originalValue = el.value;
+  el.addEventListener('focus', () => { originalValue = el.value; });
+  el.addEventListener('blur', () => {
+    el.value = el.value.toUpperCase();
+    if (el.value.trim() !== originalValue.trim()) {
+      resetSeries();
+    }
+  });
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') el.blur();
+  });
+});
+
+renderPips();
+
+/* ==========================================================================
+   Conexión automática a StarCraft II (Game State API local)
+   El juego debe estar lanzado con: -gamestate 6119 -displaymode 1
+   Expone datos en http://localhost:6119/game
+   Si no se puede conectar (juego cerrado, API desactivada, o bloqueo CORS
+   del navegador), el overlay simplemente sigue funcionando en modo manual.
+   ========================================================================== */
+
+const SC2_STATUS_FILE = 'status.json'; // archivo local escrito por sc2_proxy.py (mismo carpeta que este HTML)
+const POLL_INTERVAL_MS = 1500;
+
+let lastMatchKey = null;   // identifica la pareja de jugadores actual
+let scoredThisGame = false; // evita sumar 2 veces el mismo resultado
+
+function isAutoEnabled() {
+  const el = document.getElementById('auto-toggle');
+  return el ? el.checked : true;
+}
+
+function setApiStatus(connected, label) {
+  const el = document.getElementById('api-status');
+  if (!el) return;
+  el.textContent = label;
+  el.classList.toggle('connected', connected);
+}
+
+function setDebug(text) {
+  const el = document.getElementById('api-debug');
+  if (el) el.textContent = text;
+}
+
+function raceCodeFromApi(raceStr) {
+  if (!raceStr) return null;
+  const s = String(raceStr).toLowerCase();
+  if (s.startsWith('terr')) return 'T';
+  if (s.startsWith('prot')) return 'P';
+  if (s.startsWith('zerg')) return 'Z';
+  return null;
+}
+
+function updateNameFromApi(side, name) {
+  if (!name) return;
+  const el = document.getElementById('name' + side);
+  if (el) el.value = String(name).toUpperCase();
+}
+
+function setRaceFromApi(side, race) {
+  if (!race || races[side] === race) return;
+  races[side] = race;
+  setIcon(side, race);
+  const row = document.getElementById('race' + side);
+  if (row) {
+    row.querySelectorAll('.race-btn').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-race') === race);
+    });
+  }
+  renderPips();
+}
+
+function handleSC2Data(data) {
+  if (!isAutoEnabled()) return;
+  if (!data || !Array.isArray(data.players) || data.players.length < 2) {
+    setApiStatus(true, 'En menú');
+    return;
+  }
+
+  const players = data.players.slice(0, 2);
+  const matchKey = players.map(p => p.name || '').join('|');
+
+  // Nueva serie/partida detectada (cambio de jugadores) -> reset automático del contador
+  if (matchKey && matchKey !== lastMatchKey) {
+    lastMatchKey = matchKey;
+    scoredThisGame = false;
+    resetSeries();
+  }
+
+  // Se actualiza nombre y raza en CADA sondeo (no solo al detectar jugador nuevo)
+  updateNameFromApi(1, players[0].name);
+  updateNameFromApi(2, players[1].name);
+  setRaceFromApi(1, raceCodeFromApi(players[0].race));
+  setRaceFromApi(2, raceCodeFromApi(players[1].race));
+
+  const r1 = players[0].result;
+  const r2 = players[1].result;
+
+  if (!scoredThisGame) {
+    if (r1 === 'Victory') { changeScore(1, 1); scoredThisGame = true; }
+    else if (r2 === 'Victory') { changeScore(2, 1); scoredThisGame = true; }
+  }
+
+  setApiStatus(true, data.isReplay ? 'Replay' : 'En partida');
+}
+
+async function pollSC2() {
+  try {
+    const res = await fetch(SC2_STATUS_FILE + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    setDebug(JSON.stringify(data).slice(0, 140));
+    handleSC2Data(data);
+  } catch (err) {
+    setApiStatus(false, 'Sin conexión');
+    setDebug('Error: ' + (err && err.message ? err.message : err));
+  }
+}
+
+setInterval(pollSC2, POLL_INTERVAL_MS);
+pollSC2();
+</script>
+
+</body>
+</html>
