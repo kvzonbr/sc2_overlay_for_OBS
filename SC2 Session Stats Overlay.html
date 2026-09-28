@@ -29,13 +29,57 @@
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
 <!-- El CSS del overlay ahora vive en style.css, en la misma carpeta que este archivo -->
 <link rel="stylesheet" href="style.css">
+
 </head>
 <body>
 
 <div id="panel">
   <div id="header">
     <div id="title"><span id="api-dot"></span><span id="title-text">Jornada</span></div>
-    <button id="reset-btn" onclick="resetSession()">Reset</button>
+    <div id="header-buttons">
+      <button id="edit-btn" onclick="toggleEditPanel()" title="Ajustar contadores manualmente">&#9998;</button>
+      <button id="reset-btn" onclick="resetSession()">Reset</button>
+    </div>
+  </div>
+
+  <div id="edit-panel" class="hidden">
+    <div class="edit-row">
+      <span class="edit-lbl">Ganadas</span>
+      <button class="edit-btn-sm" onclick="adjustStat('wins', -1)">-</button>
+      <button class="edit-btn-sm" onclick="adjustStat('wins', 1)">+</button>
+    </div>
+    <div class="edit-row">
+      <span class="edit-lbl">Perdidas</span>
+      <button class="edit-btn-sm" onclick="adjustStat('losses', -1)">-</button>
+      <button class="edit-btn-sm" onclick="adjustStat('losses', 1)">+</button>
+    </div>
+    <div class="edit-row edit-sub">vs Terran</div>
+    <div class="edit-row">
+      <span class="edit-lbl">G / P</span>
+      <button class="edit-btn-sm" onclick="adjustRace('T','w',-1)">-</button>
+      <button class="edit-btn-sm" onclick="adjustRace('T','w',1)">+</button>
+      <span class="edit-sep">/</span>
+      <button class="edit-btn-sm" onclick="adjustRace('T','l',-1)">-</button>
+      <button class="edit-btn-sm" onclick="adjustRace('T','l',1)">+</button>
+    </div>
+    <div class="edit-row edit-sub">vs Protoss</div>
+    <div class="edit-row">
+      <span class="edit-lbl">G / P</span>
+      <button class="edit-btn-sm" onclick="adjustRace('P','w',-1)">-</button>
+      <button class="edit-btn-sm" onclick="adjustRace('P','w',1)">+</button>
+      <span class="edit-sep">/</span>
+      <button class="edit-btn-sm" onclick="adjustRace('P','l',-1)">-</button>
+      <button class="edit-btn-sm" onclick="adjustRace('P','l',1)">+</button>
+    </div>
+    <div class="edit-row edit-sub">vs Zerg</div>
+    <div class="edit-row">
+      <span class="edit-lbl">G / P</span>
+      <button class="edit-btn-sm" onclick="adjustRace('Z','w',-1)">-</button>
+      <button class="edit-btn-sm" onclick="adjustRace('Z','w',1)">+</button>
+      <span class="edit-sep">/</span>
+      <button class="edit-btn-sm" onclick="adjustRace('Z','l',-1)">-</button>
+      <button class="edit-btn-sm" onclick="adjustRace('Z','l',1)">+</button>
+    </div>
   </div>
 
   <div id="totals">
@@ -149,37 +193,134 @@ function setPlayerFound(found) {
   title.style.opacity = found ? '1' : '0.5';
 }
 
+function toggleEditPanel() {
+  document.getElementById('edit-panel').classList.toggle('hidden');
+}
+
+function adjustStat(key, delta) {
+  stats[key] = Math.max(0, (stats[key] || 0) + delta);
+  if (key === 'wins' || key === 'losses') {
+    stats.games = stats.wins + stats.losses;
+  }
+  saveStats();
+  renderStats();
+}
+
+function adjustRace(race, kind, delta) {
+  stats.vsRace[race][kind] = Math.max(0, (stats.vsRace[race][kind] || 0) + delta);
+  saveStats();
+  renderStats();
+}
+
+/* Registra una partida como jugada, sumando victoria/derrota y el desglose
+   contra la raza del oponente. Se usa tanto para partidas resueltas en vivo
+   como para partidas resueltas "en diferido" via el mecanismo de resultado
+   pendiente (ver mas abajo). */
+function scoreGame(result, oppRace) {
+  stats.games += 1;
+  if (result === 'Victory') {
+    stats.wins += 1;
+    if (oppRace) stats.vsRace[oppRace].w += 1;
+  } else {
+    stats.losses += 1;
+    if (oppRace) stats.vsRace[oppRace].l += 1;
+  }
+  stats.scoredThisGame = true;
+  stats.pending = null;
+  saveStats();
+  renderStats();
+}
+
 /* Identifica cual de los dos jugadores es "el nuestro" comparando el nombre
    configurado en MY_PLAYER_NAME (arriba en el head) contra los nombres que
    entrega el API de SC2. Esto permite castear/mezclar partidas de distintos
-   jugadores del equipo sin que la estadistica se sume al jugador equivocado. */
+   jugadores del equipo sin que la estadistica se sume al jugador equivocado.
+   Devuelve null si el nombre configurado no aparece en esta lectura. */
+function identifyMeOpp(players) {
+  const configuredName = (MY_PLAYER_NAME || '').trim().toLowerCase();
+  const p0Name = (players[0].name || '').trim().toLowerCase();
+  const p1Name = (players[1].name || '').trim().toLowerCase();
+
+  if (configuredName && p0Name === configuredName) {
+    return { me: players[0], opp: players[1], mePos: 0 };
+  }
+  if (configuredName && p1Name === configuredName) {
+    return { me: players[1], opp: players[0], mePos: 1 };
+  }
+  return null;
+}
+
+/* Compara la partida actual contra el "snapshot" pendiente guardado
+   (jugadores, razas y posiciones) para confirmar que se trata exactamente
+   de la misma partida antes de contabilizar un resultado que llega
+   despues de haber entrado a modo Replay. */
+function matchesPending(pending, players) {
+  if (!pending) return false;
+  return (
+    (players[0].name || '') === pending.p0name &&
+    (players[1].name || '') === pending.p1name &&
+    (players[0].race || '') === pending.p0race &&
+    (players[1].race || '') === pending.p1race
+  );
+}
+
 function handleData(data) {
   if (!data || !Array.isArray(data.players) || data.players.length < 2) return;
 
-  // Los replays no son partidas jugadas en vivo: nunca deben contabilizarse.
-  if (data.isReplay) return;
+  const displayTime = typeof data.displayTime === 'number' ? data.displayTime : null;
+  const p0 = data.players[0];
+  const p1 = data.players[1];
 
-  const configuredName = (MY_PLAYER_NAME || '').trim().toLowerCase();
-  const p0Name = (data.players[0].name || '').trim().toLowerCase();
-  const p1Name = (data.players[1].name || '').trim().toLowerCase();
+  // ------------------------------------------------------------------
+  // CASO ESPECIAL: la partida entro en modo Replay.
+  //
+  // Al terminar una partida, si se presiona "Ver repeticion" antes de que
+  // el API alcance a reportar Victory/Defeat, SC2 cambia isReplay a true
+  // y el resultado puede aparecer recien en esa siguiente lectura (con la
+  // MISMA partida, mismos jugadores/razas/posiciones y un displayTime
+  // mayor al ultimo que se vio en vivo). En ese caso SI se debe
+  // contabilizar, usando el snapshot que se guardo como "pendiente"
+  // mientras la partida seguia en vivo con resultado Undecided.
+  // ------------------------------------------------------------------
+  if (data.isReplay) {
+    if (
+      stats.pending &&
+      !stats.scoredThisGame &&
+      matchesPending(stats.pending, data.players) &&
+      displayTime !== null &&
+      displayTime > stats.pending.displayTime
+    ) {
+      const identified = identifyMeOpp(data.players);
+      if (identified) {
+        const { me, opp } = identified;
+        let result = me.result;
+        if (result !== 'Victory' && result !== 'Defeat') {
+          if (opp.result === 'Victory') result = 'Defeat';
+          else if (opp.result === 'Defeat') result = 'Victory';
+        }
+        if (result === 'Victory' || result === 'Defeat') {
+          scoreGame(result, raceCodeFromApi(opp.race));
+        }
+      }
+    }
+    // Un replay nunca actua como base para detectar la "siguiente partida
+    // nueva"; eso se sigue manejando solo cuando vuelva una partida en vivo.
+    stats.lastWasReplay = true;
+    saveStats();
+    return;
+  }
 
-  let me, opp;
-  if (configuredName && p0Name === configuredName) {
-    me = data.players[0];
-    opp = data.players[1];
-  } else if (configuredName && p1Name === configuredName) {
-    me = data.players[1];
-    opp = data.players[0];
-  } else {
+  const identified = identifyMeOpp(data.players);
+  if (!identified) {
     // No se encontro el nombre configurado en esta partida (por ejemplo,
     // se esta viendo/casteando una partida ajena): no se contabiliza.
     setPlayerFound(false);
     return;
   }
+  const { me, opp } = identified;
   setPlayerFound(true);
 
   const matchKey = (me.name || '') + '|' + (opp.name || '');
-  const displayTime = typeof data.displayTime === 'number' ? data.displayTime : null;
 
   // Umbral de caida de displayTime para considerar que es una partida nueva.
   // Al iniciar una nueva partida, displayTime vuelve a un valor cercano a 0,
@@ -192,15 +333,16 @@ function handleData(data) {
 
   const isNewMatchup = matchKey && matchKey !== stats.lastMatchKey;
 
-  // Si la ultima lectura valida fue un replay, la primera partida en vivo
-  // que se vea despues SIEMPRE se trata como partida nueva, sin depender
-  // de si el matchup o el displayTime lograron detectar el cambio.
+  // Si la ultima lectura valida fue un replay (y no se logro contabilizar
+  // via el mecanismo de "pendiente" de arriba), la primera partida en vivo
+  // que se vea despues se trata como partida nueva.
   const comingFromReplay = stats.lastWasReplay;
 
   if (isNewMatchup || isNewGameByTime || comingFromReplay) {
     stats.lastMatchKey = matchKey;
     stats.scoredThisGame = false;
     stats.lastWasReplay = false;
+    stats.pending = null;
     saveStats();
   }
 
@@ -212,20 +354,30 @@ function handleData(data) {
   if (stats.scoredThisGame) return;
 
   const oppRace = raceCodeFromApi(opp.race);
-  const result = me.result;
+
+  // A veces el API de SC2 solo actualiza el campo "result" de UNO de los dos
+  // jugadores al terminar la partida, dejando al otro en "Undecided". Si eso
+  // pasa con nuestro propio jugador, inferimos el resultado a partir del
+  // resultado del oponente (si el oponente gano, nosotros perdimos y viceversa).
+  let result = me.result;
+  if (result !== 'Victory' && result !== 'Defeat') {
+    if (opp.result === 'Victory') result = 'Defeat';
+    else if (opp.result === 'Defeat') result = 'Victory';
+  }
 
   if (result === 'Victory' || result === 'Defeat') {
-    stats.games += 1;
-    if (result === 'Victory') {
-      stats.wins += 1;
-      if (oppRace) stats.vsRace[oppRace].w += 1;
-    } else {
-      stats.losses += 1;
-      if (oppRace) stats.vsRace[oppRace].l += 1;
-    }
-    stats.scoredThisGame = true;
+    scoreGame(result, oppRace);
+  } else if (displayTime !== null) {
+    // Todavia sin resultado: guardamos este snapshot como "pendiente" por si
+    // la partida pasa a modo Replay antes de que el resultado se confirme.
+    stats.pending = {
+      p0name: p0.name || '',
+      p1name: p1.name || '',
+      p0race: p0.race || '',
+      p1race: p1.race || '',
+      displayTime: displayTime
+    };
     saveStats();
-    renderStats();
   }
 }
 
