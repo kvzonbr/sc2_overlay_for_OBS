@@ -24,7 +24,7 @@ import os
 SC2_API = "http://localhost:6119/game"
 PROXY_PORT = 6120
 STATUS_FILE_NAME = "status.json"
-POLL_INTERVAL = 15.0  # segundos
+POLL_INTERVAL = 10.0  # segundos
 
 _server_thread = None
 _httpd = None
@@ -42,19 +42,32 @@ def get_script_dir():
 
 
 def set_status(text):
-    """Actualiza el texto de estado y refresca el panel de Scripts si esta abierto."""
+    """Guarda el texto de estado. Esta funcion puede llamarse desde el hilo
+    del proxy: SOLO escribe una variable simple, nunca toca objetos de la
+    UI de OBS directamente (eso debe hacerse desde el hilo principal, ver
+    refresh_status_ui / el timer agregado en start_proxy)."""
     global _status_text
     _status_text = text
+
+
+def refresh_status_ui():
+    """Se ejecuta via obs.timer_add en el hilo principal de OBS. Aqui si es
+    seguro tocar el panel de propiedades."""
     if _props_ref is not None:
-        info = obs.obs_properties_get(_props_ref, "status_info")
-        if info is not None:
-            obs.obs_property_set_description(info, "Estado del proxy:\n" + _status_text)
+        try:
+            info = obs.obs_properties_get(_props_ref, "status_info")
+            if info is not None:
+                obs.obs_property_set_description(info, "Estado del proxy:\n" + _status_text)
+        except Exception:
+            pass
 
 
 def write_status_loop():
     import datetime
     status_path = os.path.join(get_script_dir(), STATUS_FILE_NAME)
-    tmp_path = status_path + ".tmp"
+    # Nombre de temporal unico por proceso, para evitar colisiones si por
+    # error hay mas de un proxy corriendo al mismo tiempo sobre la misma carpeta.
+    tmp_path = status_path + f".{os.getpid()}.tmp"
     while not _stop_event.is_set():
         now = datetime.datetime.now().strftime("%H:%M:%S")
         try:
@@ -65,13 +78,33 @@ def write_status_loop():
             data = json.dumps({"error": str(e)}).encode("utf-8")
             set_status(f"Proxy activo, sin conexion a SC2 ({now}): {e}")
 
-        try:
-            # Escritura atomica para evitar lecturas de JSON incompleto
-            with open(tmp_path, "wb") as f:
-                f.write(data)
-            os.replace(tmp_path, status_path)
-        except Exception as e:
-            set_status(f"Error escribiendo {STATUS_FILE_NAME} ({now}): {e}")
+        # Reintenta la escritura unas cuantas veces si el archivo esta
+        # bloqueado momentaneamente (antivirus, OneDrive, otro proceso
+        # leyendolo, etc.) en vez de descartar el ciclo completo.
+        max_attempts = 3
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Escritura atomica para evitar lecturas de JSON incompleto
+                with open(tmp_path, "wb") as f:
+                    f.write(data)
+                os.replace(tmp_path, status_path)
+                last_error = None
+                break
+            except PermissionError as e:
+                last_error = e
+                # Probable bloqueo temporal: espera un poco y reintenta
+                _stop_event.wait(0.5)
+            except Exception as e:
+                last_error = e
+                break
+
+        if last_error is not None:
+            set_status(
+                f"Error escribiendo {STATUS_FILE_NAME} ({now}) tras "
+                f"{max_attempts} intentos: {last_error}. Verifica permisos "
+                "de la carpeta o que ningun otro proceso tenga el archivo abierto."
+            )
 
         _stop_event.wait(POLL_INTERVAL)
 
@@ -109,6 +142,10 @@ def start_proxy():
     _writer_thread = threading.Thread(target=write_status_loop, daemon=True)
     _writer_thread.start()
 
+    # Refresca la UI del panel de Scripts cada segundo, siempre desde el
+    # hilo principal de OBS (nunca desde write_status_loop).
+    obs.timer_add(refresh_status_ui, 1000)
+
     set_status(f"Proxy iniciado en http://localhost:{PROXY_PORT}/game")
     obs.script_log(obs.LOG_INFO, f"SC2 Proxy iniciado en http://localhost:{PROXY_PORT}/game")
 
@@ -116,6 +153,11 @@ def start_proxy():
 def stop_proxy():
     global _server_thread, _httpd, _writer_thread
     _stop_event.set()
+
+    try:
+        obs.timer_remove(refresh_status_ui)
+    except Exception:
+        pass
 
     if _httpd is not None:
         _httpd.shutdown()
