@@ -120,3 +120,69 @@ html, body {
   margin-right: 4px;
 }
 #api-dot.connected { background: var(--win); }
+
+<!-- ==========================================================================
+     Estilos del panel de ajuste manual de contadores (boton "lapiz" junto a
+     Reset). Se dejan aqui, en linea, para no requerir modificar style.css;
+     si prefieres mantener todo el CSS centralizado, puedes mover este bloque
+     a style.css sin cambios.
+     ========================================================================== -->
+<style>
+  #header-buttons { display: flex; gap: 4px; align-items: center; }
+  #edit-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.2);
+    color: var(--text-dim);
+    font-size: 9px;
+    line-height: 1;
+    padding: 2px 5px;
+    cursor: pointer;
+  }
+  #edit-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  #edit-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-top: 6px;
+    margin-top: 2px;
+    border-top: 1px solid rgba(255,255,255,0.12);
+  }
+  #edit-panel.hidden { display: none; }
+  .edit-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+  }
+  .edit-lbl {
+    color: var(--text-dim);
+    min-width: 46px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 9px;
+  }
+  .edit-sub {
+    color: var(--text-dim);
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 3px;
+    opacity: 0.7;
+  }
+  .edit-sep { color: var(--text-dim); margin: 0 2px; }
+  .edit-btn-sm {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.25);
+    color: var(--text);
+    width: 16px;
+    height: 16px;
+    line-height: 1;
+    font-size: 10px;
+    padding: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .edit-btn-sm:hover { background: rgba(255,255,255,0.12); }
+</style>
